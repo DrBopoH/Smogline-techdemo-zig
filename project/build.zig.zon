@@ -1,7 +1,13 @@
 .{
-    .name = .Smogline_techdemo_zig,
-    .version = "0.0.1",
-    .minimum_zig_version = "0.16.0-dev.2040+c475f1fcd",
-    .paths = .{""},
-    .fingerprint = 0xedd039d1c1db151b,
+	.name = .Smogline_techdemo_zig,
+	.version = "0.0.1",
+	.dependencies = .{
+		.zglfw = .{
+			.url = "git+https://github.com/zig-gamedev/zglfw#d9c06187e8b23e91b2ba6865d265e4213e5e7d09",
+			.hash = "zglfw-0.10.0-dev-zgVDNC64IQCeL-_eVOA27Wa50WVitrJswOZVvgcXmIsy",
+		},
+	},
+	.minimum_zig_version = "0.16.0-dev.2040+c475f1fcd",
+	.paths = .{""},
+	.fingerprint = 0xedd039d1c1db151b,
 }

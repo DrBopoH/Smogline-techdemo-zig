@@ -13,6 +13,17 @@ pub fn build(b: *std.Build) void {
 		}),
 	});
 
+	const zglfw = b.dependency("zglfw", .{
+		.target = target,
+		.optimize = optimize,
+		// .import_vulkan = true,  // если планируешь Vulkan
+	});
+
+	exe.root_module.addImport("zglfw", zglfw.module("root"));
+	exe.root_module.linkLibrary(zglfw.artifact("glfw"));
+
+	exe.root_module.linkSystemLibrary("GL", .{});
+
 	b.installArtifact(exe);
 
 	const run_cmd = b.addRunArtifact(exe);
