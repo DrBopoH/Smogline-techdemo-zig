@@ -1,26 +1,21 @@
 const std = @import("std");
-const glfw = @import("zglfw");
-
-const platform = @import("platform/glfw.zig");
+const surface = @import("surface/glfw.zig");
 
 pub fn main() !void {
-	try platform.init();
-	defer platform.deinit();
+	try surface.init();
+	defer surface.deinit();
 
-	const window = try platform.createWindow(
-		1280,
-		720,
-		"Zig Smogline Tech Demo",
-	);
-	defer platform.destroyWindow(window);
+	const window = try surface.createWindow("Zig Smogline Tech Demo", 1280, 720);
+	defer surface.destroyWindow(window);
+	
+	surface.makeContextCurrent(window);
 
-	glfw.makeContextCurrent(window);
-
-	while (!platform.shouldClose(window)) {
-		platform.pollEvents();
+	while (!surface.shouldClose(window)) {
+		surface.pollEvents();
 
 		// TODO: update()
 		// TODO: render()
+
 		window.swapBuffers();
 	}
 }
