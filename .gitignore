@@ -1,5 +1,9 @@
 *.sublime-project
 *.sublime-workspace
+.idea/
 
 .zig-cache/
 zig-out/
+
+*.exe
+*.elf
