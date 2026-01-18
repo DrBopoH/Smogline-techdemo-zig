@@ -3,11 +3,18 @@ const sokol = @import("sokol");
 const sapp = sokol.app;
 const sg = sokol.gfx;
 
-// ---------------- Vertex ----------------
+
+
 const Vertex = struct {
 	pos: [3]f32,
 	color: [3]f32,
 };
+
+const Uniforms = struct {
+	model: [16]f32 align(16),
+};
+
+
 
 const vertices: [8]Vertex = .{
 	.{ .pos = .{-0.5, -0.5, -0.5}, .color = [3]f32{1,0,0} },
@@ -29,19 +36,111 @@ const indices: [36]u16 = .{
 	0,1,5,  5,4,0, // bottom
 };
 
-// ---------------- Globals ----------------
+var rotation: f32 = 0.0;
+
+var u: Uniforms = .{ .model = [_]f32{0} ** 16 };
+
+
+
+
+
 var vertex_buffer: sg.Buffer = sg.Buffer{};
 var index_buffer: sg.Buffer = sg.Buffer{};
 var pipeline: sg.Pipeline = sg.Pipeline{};
 var gfx_sc: sg.Swapchain = sg.Swapchain{};
 
-// ---------------- Init ----------------
+
+
+var Page_Allocator: std.mem.Allocator = std.heap.page_allocator;
+
+const env: std.process.Environ = .{
+	.block = &.{},
+};
+
+fn readFileAll(allocator: *std.mem.Allocator, io: std.Io, file: std.Io.File) ![]u8 {
+	var buffer: [4096]u8 = undefined;
+	var content = try allocator.alloc(u8, 0);
+	var offset: u64 = 0;
+
+	while (true) {
+		const size = try std.Io.File.readPositionalAll(file, io, &buffer, offset);
+		if (size == 0) break;
+		const old_len = content.len;
+		content = try allocator.realloc(content, old_len + size);
+		
+		var i: usize = 0;
+		while (i < size) : (i += 1) {
+			content[old_len + i] = buffer[i];
+		}
+		
+		offset += size;
+	}
+
+	return content;
+}
+
+
+pub fn readFileAlloc(allocator: *std.mem.Allocator, path: []const u8,) ![]u8 {
+	var t = std.Io.Threaded.init(allocator.*, .{ .environ = env });
+	const io = std.Io.Threaded.io(&t);
+	const dir = std.Io.Dir.cwd();
+
+	const file = try dir.openFile(io, path, .{ .mode = .read_only });
+	defer file.close(io);
+
+	return try readFileAll(allocator, io, file);
+}
+
+fn readFileAllocOrPanic(allocator: *std.mem.Allocator, path: []const u8) []u8 {
+	return readFileAlloc(allocator, path) catch |err| {
+		std.debug.print("Failed to read file {s}: {s}\n", .{path, @typeName(@TypeOf(err))});
+		@panic("Failed to read file");
+	};
+}
+
+fn makeShader() sg.Shader {
+    const vert_src = readFileAllocOrPanic(&Page_Allocator, "vertex.glsl");
+    const frag_src = readFileAllocOrPanic(&Page_Allocator, "fragment.glsl");
+
+    return sg.makeShader(.{
+        .vertex_func = .{
+            .source = vert_src.ptr,
+        },
+        .fragment_func = .{
+            .source = frag_src.ptr,
+        },
+
+        .attrs = blk: {
+            var attrs = [_]sg.ShaderVertexAttr{.{}} ** 16;
+            attrs[0] = .{ .glsl_name = "pos",   .base_type = .FLOAT };
+            attrs[1] = .{ .glsl_name = "color", .base_type = .FLOAT };
+            break :blk attrs;
+        },
+
+        .uniform_blocks = blk: {
+            var blocks = [_]sg.ShaderUniformBlock{.{}} ** 8;
+            blocks[0] = .{
+                .stage = .VERTEX, 
+                .size = @sizeOf(Uniforms),
+                .glsl_uniforms = blk_u: {
+                    var un = [_]sg.GlslShaderUniform{.{}} ** 16;
+                    un[0] = .{ 
+                        .glsl_name = "model",
+                        .type = .MAT4 
+                    };
+                    break :blk_u un;
+                },
+            };
+            break :blk blocks;
+        },
+    });
+}
+
 fn init() callconv(.c) void {
 	sg.setup(.{
 		.logger = .{ .func = sokol.log.func },
 	});
 
-	// Buffers
 	vertex_buffer = sg.makeBuffer(.{
 		.size = @sizeOf(@TypeOf(vertices)),
 		.usage = .{ 
@@ -65,33 +164,7 @@ fn init() callconv(.c) void {
 	});
 
 
-	// Shader
-	const shader = sg.makeShader(.{ 
-		.vertex_func = sg.ShaderFunction{ 
-			.source = "#version 450\nlayout(location=0) in vec3 pos;\nlayout(location=1) in vec3 color;\nlayout(location=0) out vec3 frag_color;\nvoid main() {\n\tgl_Position = vec4(pos,1.0);\n\tfrag_color = color;\n}",	
-		}, 
-		.fragment_func = sg.ShaderFunction{ 
-			.source = "#version 450\nlayout(location=0) in vec3 frag_color;\nlayout(location=0) out vec4 out_color;\nvoid main() {\n\tout_color = vec4(frag_color,1.0);\n}",
-		}, 
-		.attrs = [_]sg.ShaderVertexAttr{
-			.{ .glsl_name = "pos", .base_type = .FLOAT },
-			.{ .glsl_name = "color", .base_type = .FLOAT },
-			.{}, 
-			.{}, 
-			.{}, 
-			.{}, 
-			.{}, 
-			.{}, 
-			.{}, 
-			.{}, 
-			.{}, 
-			.{}, 
-			.{}, 
-			.{}, 
-			.{}, 
-			.{}, 
-		},
-	});
+	const shader = makeShader();
 
 	pipeline = sg.makePipeline(.{
 		.shader = shader,
@@ -139,11 +212,36 @@ fn init() callconv(.c) void {
 	};
 }
 
+
+
+fn mat4RotationXYZ(rx: f32, ry: f32, rz: f32) [16]f32 {
+	const cx = @cos(rx);
+	const sx = @sin(rx);
+	const cy = @cos(ry);
+	const sy = @sin(ry);
+	const cz = @cos(rz);
+	const sz = @sin(rz);
+
+	return [_]f32{
+		 cy*cz,            -cy*sz,             sy,    0.0,
+		
+		 sx*sy*cz + cx*sz, -sx*sy*sz + cx*cz, -sx*cy, 0.0,
+		
+		-cx*sy*cz + sx*sz,  cx*sy*sz + sx*cz,  cx*cy, 0.0,
+
+		 0.0,               0.0,               0.0,   1.0,
+	};
+}
+
+
 fn frame() callconv(.c) void {
 	const CLEAR_COLOR: sg.ColorAttachmentAction = .{
 		.load_action = .CLEAR,
 		.clear_value = .{ .r=0.1, .g=0.12, .b=0.15, .a=1.0 },
 	};
+
+	rotation += 0.01;
+	u.model = mat4RotationXYZ(rotation, rotation * 0.7, rotation * 1.3);
 
 	sg.beginPass(.{
 		.swapchain = gfx_sc,
@@ -152,6 +250,8 @@ fn frame() callconv(.c) void {
 		},
 	});
 
+
+	sg.applyPipeline(pipeline);
 
 	const bind = sg.Bindings{
 		.vertex_buffers = [_]sg.Buffer{
@@ -166,9 +266,9 @@ fn frame() callconv(.c) void {
 		},
 		.index_buffer = index_buffer,
 	};
-
-	sg.applyPipeline(pipeline);
 	sg.applyBindings(bind);	
+	
+	sg.applyUniforms(0, .{ .ptr = &u, .size = @sizeOf(Uniforms), });
 	sg.draw(0, 36, 1);
 
 
